@@ -1,0 +1,320 @@
+<!--Revision of the Tagalog Jeopardy Game, made with Claude. -->
+<!--
+This version includes a reference sheet, where the vocab will be located, along with a penalty for accessing such reference sheet.
+The questions are in categories of 5, with a time limit and increasing difficulty corresponding to increasing amount of points.
+This program was made largely with the use of Claude AI, and is designed to help the beginnings of learning in the Tagalog language. 
+The next program will be builiding on this, but will not be a jeopardy game, and instead will most likely lean more toward the 'game' aspect of things.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Tagalog Jeopardy</title>
+  <style>
+    body { background: #060ce9; color: white; font-family: sans-serif; text-align: center; margin: 0; padding: 20px; }
+    .scoreboard { font-size: 20px; margin: 10px 0 16px; color: #d4af37; }
+    .board { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; max-width: 680px; margin: auto; }
+    .cat-header { background: #000080; border: 2px solid white; padding: 10px 4px; font-weight: 500; font-size: 13px; }
+    .tile { border: 2px solid #d4af37; color: #d4af37; font-size: 22px; font-weight: 500; padding: 20px 4px; cursor: pointer; background: #060ce9; }
+    .tile:hover { background: #1a1aff; }
+    .tile.used { visibility: hidden; pointer-events: none; }
+    .ref-wrap { position: relative; display: inline-block; margin-bottom: 8px; }
+    .ref-btn { background: #d4af37; color: #060ce9; padding: 7px 14px; font-weight: 500; border: none; cursor: pointer; border-radius: 6px; font-size: 13px; }
+    .ref-panel { display: none; position: absolute; top: 100%; left: 0; background: white; color: #222; min-width: 200px; padding: 10px 14px; border-radius: 6px; text-align: left; font-size: 13px; z-index: 5; }
+    .ref-wrap:hover .ref-panel { display: block; }
+    .penalty-badge { background: #dc3545; color: white; font-size: 12px; padding: 2px 8px; border-radius: 10px; margin-left: 8px; }
+    #overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 5; }
+    #modal { display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+             background: white; color: #111; padding: 24px 28px; border: 6px solid #d4af37;
+             border-radius: 10px; width: 400px; z-index: 10; }
+    .timer-bar-wrap { background: #eee; border-radius: 4px; height: 8px; margin-bottom: 12px; }
+    .timer-bar { height: 8px; border-radius: 4px; background: #28a745; transition: width 1s linear, background 0.5s; }
+    .level-tag { color: #888; font-size: 12px; margin-bottom: 6px; }
+    .q-text { font-size: 18px; font-weight: 500; margin: 10px 0 16px; }
+    .choice-btn { display: block; width: 100%; padding: 10px 14px; margin: 7px 0; background: #f4f4f4;
+                  border: 1.5px solid #ccc; cursor: pointer; font-weight: 500; font-size: 15px;
+                  border-radius: 6px; text-align: left; box-sizing: border-box; }
+    .choice-btn:hover:not(:disabled) { background: #e8e8ff; border-color: #060ce9; }
+    .choice-btn.correct { background: #d4edda; border-color: #28a745; color: #155724; }
+    .choice-btn.wrong   { background: #f8d7da; border-color: #dc3545; color: #721c24; }
+    .choice-btn.reveal  { background: #d4edda; border-color: #28a745; color: #155724; }
+    .feedback-msg { font-size: 14px; font-weight: 500; margin-top: 10px; min-height: 20px; }
+    .feedback-msg.ok  { color: #155724; }
+    .feedback-msg.bad { color: #721c24; }
+    .reset-btn { background: #d4af37; color: #060ce9; margin-top: 20px; padding: 11px 26px;
+                 font-size: 16px; cursor: pointer; font-weight: 500; border: none; border-radius: 6px; }
+    .win-banner { font-size: 22px; color: #d4af37; font-weight: 500; padding: 20px; display: none; }
+    .footer { max-width: 680px; margin: 40px auto 10px auto; border-top: 1px solid rgba(255,255,255,0.25);
+              padding-top: 20px; color: rgba(255,255,255,0.75); font-size: 13px; line-height: 1.8; text-align: left; }
+  </style>
+</head>
+<body>
+
+  <div style="text-align:right; max-width:680px; margin:0 auto 6px auto;">
+    <div class="ref-wrap">
+      <button class="ref-btn" onmouseenter="game.activatePenalty()">Reference guide ▼</button>
+      <div class="ref-panel">
+        <p style="color:red;margin:0 0 6px;font-size:11px;">Opening this = 0 pts next turn</p>
+        <p style="margin:2px 0;">1: Isa &nbsp;|&nbsp; 2: Dalawa &nbsp;|&nbsp; 3: Tatlo</p>
+        <p style="margin:2px 0;">House: Bahay &nbsp;|&nbsp; Water: Tubig</p>
+      </div>
+    </div>
+  </div>
+
+  <h1 style="margin:0 0 4px;font-size:28px;">Tagalog Jeopardy</h1>
+  <div class="scoreboard">
+    Score: <span id="score">0</span>
+    <span id="penaltyBadge" class="penalty-badge" style="display:none;">Penalty on</span>
+  </div>
+
+  <div class="board" id="gameBoard"></div>
+
+  <div id="winBanner" class="win-banner">
+    All done! Final score: <span id="finalScore"></span>
+  </div>
+
+  <button class="reset-btn" onclick="game.reset()">Reset game</button>
+
+  <!-- Footer description -->
+  <div class="footer">
+    <p>This version includes a reference sheet, where the vocab will be located, along with a penalty for accessing such reference sheet.</p>
+    <p>The questions are in categories of 5, with a time limit and increasing difficulty corresponding to increasing amount of points.</p>
+    <p>This program was made largely with the use of Claude AI, and is designed to help the beginnings of learning in the Tagalog language.</p>
+    <p>The next program will be building on this, but will not be a jeopardy game, and instead will most likely lean more toward the 'game' aspect of things.</p>
+  </div>
+
+  <div id="overlay"></div>
+  <div id="modal">
+    <div class="timer-bar-wrap"><div class="timer-bar" id="timerBar" style="width:100%"></div></div>
+    <div class="level-tag" id="levelTag"></div>
+    <div class="q-text" id="qText"></div>
+    <div id="choicesContainer"></div>
+    <div class="feedback-msg" id="feedbackMsg"></div>
+  </div>
+
+  <script>
+    const QUESTIONS = {
+      "Numbers": [
+        /* Tier 1 - easiest */
+        { q: "Translate: One",         choices: ["Isa","Dalawa","Tatlo"],                 a: "Isa" },
+        /* Tier 2 */
+        { q: "Translate: Five",        choices: ["Apat","Lima","Anim"],                  a: "Lima" },
+        /* Tier 3 */
+        { q: "Translate: Ten",         choices: ["Siyam","Sampu","Walo"],                a: "Sampu" },
+        /* Tier 4 */
+        { q: "Translate: Twenty",      choices: ["Sampu","Dalawampu","Tatlumpu"],        a: "Dalawampu" },
+        /* Tier 5 - hardest */
+        { q: "Translate: One hundred", choices: ["Isang daan","Isang libo","Siyamnapu"], a: "Isang daan" }
+      ],
+      "Places": [
+        /* Tier 1 */
+        { q: "Translate: House",    choices: ["Paaralan","Simbahan","Bahay"],     a: "Bahay" },
+        /* Tier 2 */
+        { q: "Translate: School",   choices: ["Paaralan","Palengke","Ospital"],  a: "Paaralan" },
+        /* Tier 3 */
+        { q: "Translate: Market",   choices: ["Bundok","Palengke","Dagat"],      a: "Palengke" },
+        /* Tier 4 */
+        { q: "Translate: Hospital", choices: ["Simbahan","Ospital","Paliparan"], a: "Ospital" },
+        /* Tier 5 */
+        { q: "Translate: Airport",  choices: ["Daungan","Paliparan","Estasyon"], a: "Paliparan" }
+      ],
+      "Sentences": [
+        /* Tier 1 */
+        { q: "Translate: Thank you",          choices: ["Salamat","Walang anuman","Paalam"],               a: "Salamat" },
+        /* Tier 2 */
+        { q: "Translate: Good morning",       choices: ["Magandang gabi","Magandang umaga","Kumusta"],     a: "Magandang umaga" },
+        /* Tier 3 */
+        { q: "Translate: How much?",          choices: ["Saan?","Kailan?","Magkano?"],                     a: "Magkano?" },
+        /* Tier 4 */
+        { q: "Translate: Where is it?",       choices: ["Nasaan ito?","Kailan ito?","Ano ito?"],           a: "Nasaan ito?" },
+        /* Tier 5 */
+        { q: "Translate: I don't understand", choices: ["Hindi ako gutom","Hindi ko maintindihan","Ayoko"], a: "Hindi ko maintindihan" }
+      ],
+      "Foods": [
+        /* Tier 1 */
+        { q: "Translate: Water",      choices: ["Kape","Tubig","Gatas"],    a: "Tubig" },
+        /* Tier 2 */
+        { q: "Translate: Rice",       choices: ["Kanin","Tinapay","Isda"],  a: "Kanin" },
+        /* Tier 3 */
+        { q: "Translate: Bread",      choices: ["Kanin","Tinapay","Karne"], a: "Tinapay" },
+        /* Tier 4 */
+        { q: "Translate: Fish",       choices: ["Manok","Baboy","Isda"],    a: "Isda" },
+        /* Tier 5 */
+        { q: "Translate: Vegetables", choices: ["Prutas","Gulay","Karne"],  a: "Gulay" }
+      ]
+    };
+
+    /* One point value per tier row */
+    const POINT_VALUES = [100, 200, 300, 400, 500];
+    const CATS = Object.keys(QUESTIONS);
+    const NUM_TIERS = POINT_VALUES.length;
+
+    const game = (() => {
+      let state = {};
+
+      function initState() {
+        state = {
+          score: 0,
+          penaltyActive: false,
+          /* Track which tiles have been answered per category */
+          answered: Object.fromEntries(CATS.map(c => [c, Array(NUM_TIERS).fill(false)])),
+          current: null,
+          timerInterval: null,
+          timeLeft: 15,
+          answeredThisRound: false
+        };
+      }
+
+      function buildBoard() {
+        const board = document.getElementById('gameBoard');
+        board.innerHTML = '';
+
+        /* Category headers */
+        CATS.forEach(cat => {
+          const h = document.createElement('div');
+          h.className = 'cat-header';
+          h.textContent = cat;
+          board.appendChild(h);
+        });
+
+        /* One row per tier */
+        for (let row = 0; row < NUM_TIERS; row++) {
+          CATS.forEach(cat => {
+            const div = document.createElement('div');
+            div.className = 'tile' + (state.answered[cat][row] ? ' used' : '');
+            div.textContent = '$' + POINT_VALUES[row];
+            div.onclick = () => openQuestion(cat, row, div);
+            board.appendChild(div);
+          });
+        }
+      }
+
+      function checkWin() {
+        const allDone = CATS.every(cat => state.answered[cat].every(Boolean));
+        if (allDone) {
+          document.getElementById('winBanner').style.display = 'block';
+          document.getElementById('finalScore').textContent = state.score;
+        }
+      }
+
+      function openQuestion(cat, row, el) {
+        if (state.answered[cat][row]) return;
+        state.current = { cat, row, el };
+        state.timeLeft = 15;
+        state.answeredThisRound = false;
+
+        /* Each tile maps directly to its question by row index */
+        const qData = QUESTIONS[cat][row];
+        document.getElementById('levelTag').textContent = 'Tier ' + (row + 1) + ' — ' + POINT_VALUES[row] + ' pts';
+        document.getElementById('qText').textContent = qData.q;
+        document.getElementById('feedbackMsg').textContent = '';
+        document.getElementById('feedbackMsg').className = 'feedback-msg';
+
+        const container = document.getElementById('choicesContainer');
+        container.innerHTML = '';
+        qData.choices.forEach(choice => {
+          const btn = document.createElement('button');
+          btn.className = 'choice-btn';
+          btn.textContent = choice;
+          btn.onclick = () => handleAnswer(choice === qData.a, choice, qData.a);
+          container.appendChild(btn);
+        });
+
+        updateTimerBar();
+        document.getElementById('modal').style.display = 'block';
+        document.getElementById('overlay').style.display = 'block';
+
+        clearInterval(state.timerInterval);
+        state.timerInterval = setInterval(() => {
+          state.timeLeft--;
+          updateTimerBar();
+          if (state.timeLeft <= 0) {
+            clearInterval(state.timerInterval);
+            handleAnswer(false, null, qData.a);
+          }
+        }, 1000);
+      }
+
+      function updateTimerBar() {
+        const pct = (state.timeLeft / 15) * 100;
+        const bar = document.getElementById('timerBar');
+        bar.style.width = pct + '%';
+        bar.style.background = pct > 50 ? '#28a745' : pct > 25 ? '#ffc107' : '#dc3545';
+      }
+
+      function handleAnswer(isCorrect, chosen, correctAnswer) {
+        if (state.answeredThisRound) return;
+        state.answeredThisRound = true;
+        clearInterval(state.timerInterval);
+
+        const { cat, row, el } = state.current;
+        const pts = POINT_VALUES[row];
+        const btns = document.getElementById('choicesContainer').querySelectorAll('.choice-btn');
+        const feedbackEl = document.getElementById('feedbackMsg');
+
+        /* Highlight correct and wrong answers */
+        btns.forEach(btn => {
+          btn.disabled = true;
+          if (btn.textContent === correctAnswer) btn.classList.add('reveal');
+          if (chosen && btn.textContent === chosen && !isCorrect) btn.classList.add('wrong');
+          if (chosen && btn.textContent === chosen && isCorrect) btn.classList.add('correct');
+        });
+
+        if (!state.penaltyActive) {
+          if (isCorrect) {
+            state.score += pts;
+            feedbackEl.textContent = '+' + pts + ' — correct!';
+            feedbackEl.className = 'feedback-msg ok';
+          } else {
+            state.score -= Math.floor(pts / 2);
+            feedbackEl.textContent = chosen
+              ? '-' + Math.floor(pts / 2) + ' — the answer was: ' + correctAnswer
+              : "Time's up! The answer was: " + correctAnswer;
+            feedbackEl.className = 'feedback-msg bad';
+          }
+        } else {
+          /* Penalty turn — zero points, reset penalty */
+          state.penaltyActive = false;
+          document.getElementById('penaltyBadge').style.display = 'none';
+          feedbackEl.textContent = 'Penalty turn — 0 points scored.';
+          feedbackEl.className = 'feedback-msg bad';
+        }
+
+        document.getElementById('score').textContent = state.score;
+        state.answered[cat][row] = true;
+
+        /* Close modal after a short delay so feedback can be read */
+        setTimeout(() => {
+          document.getElementById('modal').style.display = 'none';
+          document.getElementById('overlay').style.display = 'none';
+          el.classList.add('used');
+          checkWin();
+        }, 2000);
+      }
+
+      function activatePenalty() {
+        if (!state.penaltyActive) {
+          state.penaltyActive = true;
+          document.getElementById('penaltyBadge').style.display = 'inline';
+        }
+      }
+
+      function reset() {
+        clearInterval(state.timerInterval);
+        document.getElementById('modal').style.display = 'none';
+        document.getElementById('overlay').style.display = 'none';
+        document.getElementById('winBanner').style.display = 'none';
+        initState();
+        document.getElementById('score').textContent = 0;
+        document.getElementById('penaltyBadge').style.display = 'none';
+        buildBoard();
+      }
+
+      initState();
+      buildBoard();
+
+      return { activatePenalty, reset };
+    })();
+  </script>
+</body>
+</html>

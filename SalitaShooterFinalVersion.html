@@ -1,0 +1,347 @@
+<!--This is the second tagalog language learning game.
+It was developed using Claude AI, and is based off of a simpler version of Space Invaders-type games.-->
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Salita Shooter</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #1a1a2e; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; font-family: sans-serif; padding: 16px; }
+  #game-root { width: 680px; max-width: 100%; user-select: none; }
+  #hud { display: flex; justify-content: space-between; align-items: center; padding: 8px 16px; background: #2a2a3e; border-radius: 8px; margin-bottom: 10px; }
+  #lives-display { font-size: 13px; color: #aaa; }
+  #score-display { font-size: 13px; font-weight: 500; color: #fff; }
+  #level-display { font-size: 13px; color: #aaa; }
+  #canvas-wrap { position: relative; width: 100%; border-radius: 12px; overflow: hidden; cursor: none; }
+  #gameCanvas { display: block; width: 100%; }
+  #overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.78); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; }
+  #overlay h2 { color: #fff; font-size: 22px; font-weight: 500; }
+  #overlay p { color: #aaa; font-size: 14px; text-align: center; line-height: 1.6; }
+  #start-btn { padding: 12px 32px; background: #2a5aaa; border: none; border-radius: 8px; color: #fff; font-size: 16px; cursor: pointer; }
+  #start-btn:hover { background: #3a6abb; }
+</style>
+</head>
+<body>
+<div id="game-root">
+  <div id="hud">
+    <span id="lives-display">Lives: ❤ ❤ ❤</span>
+    <span id="score-display">Score: 0</span>
+    <span id="level-display">Level 1</span>
+  </div>
+  <div id="canvas-wrap">
+    <canvas id="gameCanvas"></canvas>
+    <div id="overlay">
+      <h2>Salita Shooter</h2>
+      <p>Move your mouse to aim the ship.<br>Click to shoot the correct Tagalog translation.<br>Hit the right word — avoid the wrong ones!</p>
+      <button id="start-btn">Start Game</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const vocab = [
+  {en:"cat",tl:"pusa"},{en:"dog",tl:"aso"},{en:"house",tl:"bahay"},{en:"water",tl:"tubig"},
+  {en:"food",tl:"pagkain"},{en:"child",tl:"bata"},{en:"mother",tl:"nanay"},{en:"father",tl:"tatay"},
+  {en:"school",tl:"paaralan"},{en:"book",tl:"aklat"},{en:"sun",tl:"araw"},{en:"moon",tl:"buwan"},
+  {en:"fire",tl:"apoy"},{en:"tree",tl:"puno"},{en:"fish",tl:"isda"},{en:"rice",tl:"kanin"},
+  {en:"friend",tl:"kaibigan"},{en:"love",tl:"pag-ibig"},{en:"happy",tl:"masaya"},{en:"big",tl:"malaki"},
+  {en:"small",tl:"maliit"},{en:"beautiful",tl:"maganda"},{en:"good",tl:"mabuti"},{en:"fast",tl:"mabilis"},
+  {en:"red",tl:"pula"},{en:"blue",tl:"asul"},{en:"white",tl:"puti"},{en:"black",tl:"itim"},
+  {en:"one",tl:"isa"},{en:"two",tl:"dalawa"},{en:"three",tl:"tatlo"},{en:"thank you",tl:"salamat"},
+  {en:"good morning",tl:"magandang umaga"},{en:"I love you",tl:"mahal kita"},{en:"I eat",tl:"kumakain ako"}
+];
+
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const wrap = document.getElementById('canvas-wrap');
+const overlay = document.getElementById('overlay');
+const livesEl = document.getElementById('lives-display');
+const scoreEl = document.getElementById('score-display');
+const levelEl = document.getElementById('level-display');
+
+const W = 680, H = 480;
+canvas.width = W; canvas.height = H;
+
+const COLORS = {
+  neutral: { bg: 'rgba(20,40,110,0.88)', border: '#4169e1', text: '#aac0ff' },
+  correct: { bg: 'rgba(20,70,20,0.88)', border: '#3a9a3a', text: '#aaffaa' },
+  wrong:   { bg: 'rgba(80,15,15,0.88)', border: '#cc3333', text: '#ffaaaa' }
+};
+
+let mouse = { x: W/2, y: H - 50 };
+let state = {};
+let animId = null;
+
+function shuffle(a) { return [...a].sort(() => Math.random() - 0.5); }
+
+function initState() {
+  return {
+    running: false, score: 0, lives: 3, level: 1,
+    ship: { x: W/2, y: H - 50 },
+    bullets: [], enemies: [], particles: [], floatingTexts: [],
+    currentItem: null, correctWord: null,
+    answerRevealed: false,
+    spawnTimer: 0, spawnInterval: 140,
+    shootCooldown: 0,
+    stars: Array.from({length:80}, () => ({ x: Math.random()*W, y: Math.random()*H, r: Math.random() }))
+  };
+}
+
+function newRound(s) {
+  const item = vocab[Math.floor(Math.random() * vocab.length)];
+  s.currentItem = item;
+  s.correctWord = item.tl;
+  s.answerRevealed = false;
+  const distractors = shuffle(vocab.filter(v => v.tl !== item.tl)).slice(0, 3).map(v => v.tl);
+  s.wordPool = shuffle([item.tl, ...distractors]);
+}
+
+function spawnWave(s) {
+  const words = [...s.wordPool];
+  const count = words.length;
+  const spacing = W / (count + 1);
+  words.forEach((w, i) => {
+    s.enemies.push({
+      x: spacing * (i + 1),
+      y: -30 - i * 10,
+      vy: 0.6 + s.level * 0.18,
+      label: w,
+      correct: w === s.correctWord,
+      w: Math.max(80, w.length * 9 + 20),
+      h: 32,
+      hit: false,
+      hitAge: 0,
+      colorState: 'neutral'
+    });
+  });
+  s.wordPool = [];
+}
+
+function revealAnswers(s) {
+  s.answerRevealed = true;
+  s.enemies.forEach(e => {
+    if (!e.hit) e.colorState = e.correct ? 'correct' : 'wrong';
+  });
+}
+
+function spawnParticles(s, x, y, color, count = 10) {
+  for (let i = 0; i < count; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const speed = 1 + Math.random() * 3.5;
+    s.particles.push({ x, y, vx: Math.cos(angle)*speed, vy: Math.sin(angle)*speed - 1, life: 35 + Math.random()*20, maxLife: 55, color });
+  }
+}
+
+function addFloatingText(s, x, y, text, color) {
+  s.floatingTexts.push({ x, y, text, color, life: 50, vy: -1.2 });
+}
+
+function update(s) {
+  if (!s.running) return;
+
+  s.ship.x += (mouse.x * (W / wrap.offsetWidth) - s.ship.x) * 0.18;
+  s.ship.x = Math.max(20, Math.min(W - 20, s.ship.x));
+
+  if (s.shootCooldown > 0) s.shootCooldown--;
+
+  s.spawnTimer++;
+  if (s.enemies.length === 0 && s.wordPool.length === 0) newRound(s);
+  if (s.enemies.length === 0 && s.wordPool.length > 0) {
+    if (s.spawnTimer >= s.spawnInterval) {
+      s.spawnTimer = 0;
+      spawnWave(s);
+    }
+  }
+
+  s.level = Math.min(6, 1 + Math.floor(s.score / 80));
+  levelEl.textContent = `Level ${s.level}`;
+
+  s.bullets = s.bullets.filter(b => {
+    b.y += b.vy;
+    let alive = true;
+    s.enemies.forEach(e => {
+      if (e.hit || !alive) return;
+      if (b.x > e.x - e.w/2 && b.x < e.x + e.w/2 && b.y > e.y - e.h/2 && b.y < e.y + e.h/2) {
+        e.hit = true;
+        e.hitAge = 18;
+        alive = false;
+        revealAnswers(s);
+        if (e.correct) {
+          s.score += 10 + s.level * 5;
+          scoreEl.textContent = `Score: ${s.score}`;
+          spawnParticles(s, e.x, e.y, '#7fe07f', 14);
+          addFloatingText(s, e.x, e.y - 20, '+' + (10 + s.level*5), '#7fe07f');
+          setTimeout(() => { if (s.running) { s.enemies = []; s.wordPool = []; newRound(s); }}, 700);
+        } else {
+          s.lives = Math.max(0, s.lives - 1);
+          updateLives(s);
+          spawnParticles(s, e.x, e.y, '#e07f7f', 10);
+          addFloatingText(s, e.x, e.y - 20, 'Wrong!', '#e07f7f');
+          if (s.lives <= 0) setTimeout(() => endGame(s), 700);
+          else setTimeout(() => { if (s.running) { s.enemies = []; s.wordPool = []; newRound(s); }}, 700);
+        }
+      }
+    });
+    s.enemies.forEach(e => { if (e.hit && e.hitAge > 0) e.hitAge--; });
+    return alive && b.y > 0;
+  });
+
+  s.enemies.forEach(e => {
+    if (!e.hit) e.y += e.vy;
+    if (e.y > H + 10 && !e.hit) {
+      if (e.correct) {
+        s.lives = Math.max(0, s.lives - 1);
+        updateLives(s);
+        addFloatingText(s, e.x, H - 60, 'Missed!', '#e07f7f');
+        revealAnswers(s);
+        e.hit = true;
+        if (s.lives <= 0) setTimeout(() => endGame(s), 700);
+        else setTimeout(() => { if (s.running) { s.enemies = []; s.wordPool = []; newRound(s); }}, 700);
+      } else {
+        e.hit = true;
+      }
+    }
+  });
+  s.enemies = s.enemies.filter(e => e.y < H + 50 && (!e.hit || e.hitAge > 0));
+
+  s.particles = s.particles.filter(p => { p.x += p.vx; p.y += p.vy; p.vy += 0.12; p.life--; return p.life > 0; });
+  s.floatingTexts = s.floatingTexts.filter(t => { t.y += t.vy; t.life--; return t.life > 0; });
+}
+
+function drawShip(x, y) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.fillStyle = '#4080ff';
+  ctx.beginPath(); ctx.moveTo(0,-20); ctx.lineTo(-16,12); ctx.lineTo(16,12); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#80b0ff';
+  ctx.beginPath(); ctx.moveTo(0,-10); ctx.lineTo(-8,8); ctx.lineTo(8,8); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = 'rgba(80,160,255,0.5)';
+  ctx.beginPath(); ctx.ellipse(0, 14, 6, 4, 0, 0, Math.PI*2); ctx.fill();
+  ctx.restore();
+}
+
+function draw(s) {
+  ctx.fillStyle = '#07071a';
+  ctx.fillRect(0, 0, W, H);
+
+  s.stars.forEach(st => {
+    ctx.fillStyle = `rgba(255,255,255,${0.15 + st.r * 0.5})`;
+    ctx.fillRect(Math.round(st.x), Math.round(st.y), st.r > 0.7 ? 2 : 1, st.r > 0.7 ? 2 : 1);
+  });
+
+  ctx.strokeStyle = 'rgba(100,150,255,0.15)';
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(0, H-55); ctx.lineTo(W, H-55); ctx.stroke();
+
+  if (s.currentItem) {
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    ctx.font = '500 15px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(`Translate: "${s.currentItem.en}"`, W/2, 28);
+  }
+
+  s.enemies.forEach(e => {
+    if (e.hit && e.hitAge <= 0) return;
+    const alpha = e.hit ? e.hitAge / 18 : 1;
+    const c = COLORS[e.colorState] || COLORS.neutral;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.translate(e.x, e.y);
+    ctx.fillStyle = c.bg;
+    ctx.strokeStyle = c.border;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.roundRect(-e.w/2, -e.h/2, e.w, e.h, 6);
+    ctx.fill(); ctx.stroke();
+    ctx.font = '13px sans-serif';
+    ctx.fillStyle = c.text;
+    ctx.textAlign = 'center';
+    ctx.fillText(e.label, 0, 5);
+    ctx.fillStyle = c.border;
+    ctx.beginPath(); ctx.moveTo(-6, e.h/2+2); ctx.lineTo(0, e.h/2+10); ctx.lineTo(6, e.h/2+2); ctx.closePath(); ctx.fill();
+    ctx.restore();
+  });
+
+  s.bullets.forEach(b => {
+    ctx.fillStyle = '#ffe080';
+    ctx.beginPath(); ctx.arc(b.x, b.y, 4, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#ffb030';
+    ctx.beginPath(); ctx.arc(b.x, b.y + 4, 2.5, 0, Math.PI*2); ctx.fill();
+  });
+
+  s.particles.forEach(p => {
+    ctx.globalAlpha = p.life / p.maxLife;
+    ctx.fillStyle = p.color;
+    ctx.beginPath(); ctx.arc(p.x, p.y, 3, 0, Math.PI*2); ctx.fill();
+  });
+  ctx.globalAlpha = 1;
+
+  s.floatingTexts.forEach(t => {
+    ctx.globalAlpha = t.life / 50;
+    ctx.font = '500 14px sans-serif';
+    ctx.fillStyle = t.color;
+    ctx.textAlign = 'center';
+    ctx.fillText(t.text, t.x, t.y);
+  });
+  ctx.globalAlpha = 1;
+
+  drawShip(s.ship.x, s.ship.y);
+
+  const mx = mouse.x * (W / wrap.offsetWidth);
+  const my = mouse.y * (H / wrap.offsetHeight);
+  ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(mx-10, my); ctx.lineTo(mx+10, my); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(mx, my-10); ctx.lineTo(mx, my+10); ctx.stroke();
+  ctx.beginPath(); ctx.arc(mx, my, 5, 0, Math.PI*2); ctx.stroke();
+}
+
+function loop() {
+  update(state);
+  draw(state);
+  animId = requestAnimationFrame(loop);
+}
+
+function updateLives(s) {
+  livesEl.textContent = 'Lives: ' + ('❤ '.repeat(Math.max(0, s.lives))).trim();
+}
+
+function startGame() {
+  if (animId) cancelAnimationFrame(animId);
+  state = initState();
+  state.running = true;
+  overlay.style.display = 'none';
+  updateLives(state);
+  scoreEl.textContent = 'Score: 0';
+  levelEl.textContent = 'Level 1';
+  newRound(state);
+  loop();
+}
+
+function endGame(s) {
+  s.running = false;
+  cancelAnimationFrame(animId);
+  overlay.style.display = 'flex';
+  overlay.innerHTML = `<h2>Game Over!</h2><p>Final Score: <strong style="color:#fff">${s.score}</strong><br>You reached Level ${s.level}</p><button id="start-btn" style="padding:12px 32px;background:#2a5aaa;border:none;border-radius:8px;color:#fff;font-size:16px;cursor:pointer;">Play Again</button>`;
+  document.getElementById('start-btn').onclick = startGame;
+}
+
+wrap.addEventListener('mousemove', e => {
+  const rect = wrap.getBoundingClientRect();
+  mouse.x = e.clientX - rect.left;
+  mouse.y = e.clientY - rect.top;
+});
+
+wrap.addEventListener('click', () => {
+  if (!state.running || state.shootCooldown > 0) return;
+  state.shootCooldown = 12;
+  state.bullets.push({ x: state.ship.x, y: state.ship.y - 22, vy: -10 });
+});
+
+document.getElementById('start-btn').onclick = startGame;
+</script>
+</body>
+</html>
